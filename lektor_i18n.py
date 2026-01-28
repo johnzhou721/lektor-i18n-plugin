@@ -9,6 +9,7 @@ from os.path import exists, join, relpath
 from pprint import PrettyPrinter
 from textwrap import dedent
 from urllib.parse import urljoin
+import polib
 
 from lektor.context import get_ctx
 from lektor.db import Page
@@ -55,6 +56,14 @@ class TemplateTranslator:
         self.init_translator()
         return self.translator.ngettext(*x)
 
+    def pgettext(self, *x):
+        self.init_translator()
+        return self.translator.pgettext(*x)
+
+    def npgettext(self, *x):
+        self.init_translator()
+        return self.translator.npgettext(*x)
+
 
 class Translations:
     """Memory of translations"""
@@ -79,25 +88,24 @@ class Translations:
 
     def as_pot(self, content_language, header):
         """returns a POT version of the translation dictionary"""
-        if header is None:
-            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            now += f"+{(time.tzname[0])}"
-            header = dedent(
-                f"""msgid ""
-                msgstr ""
-                "Project-Id-Version: PACKAGE VERSION\\n"
-                "Report-Msgid-Bugs-To: \\n"
-                "POT-Creation-Date: {now}\\n"
-                "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"
-                "Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n"
-                "Language-Team: {content_language} <LL@li.org>\\n"
-                "Language: {content_language}\\n"
-                "MIME-Version: 1.0\\n"
-                "Content-Type: text/plain; charset=UTF-8\\n"
-                "Content-Transfer-Encoding: 8bit\\n"
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        now += f"+{(time.tzname[0])}"
+        header = dedent(
+            f"""msgid ""
+            msgstr ""
+            "Project-Id-Version: PACKAGE VERSION\\n"
+            "Report-Msgid-Bugs-To: \\n"
+            "POT-Creation-Date: {now}\\n"
+            "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n"
+            "Last-Translator: FULL NAME <EMAIL@ADDRESS>\\n"
+            "Language-Team: {content_language} <LL@li.org>\\n"
+            "Language: {content_language}\\n"
+            "MIME-Version: 1.0\\n"
+            "Content-Type: text/plain; charset=UTF-8\\n"
+            "Content-Transfer-Encoding: 8bit\\n"
 
-                """
-            )
+            """
+        )
 
         pot_elements = [header]
 
@@ -136,15 +144,29 @@ class Translations:
             f.write(self.as_pot(language, header))
 
     @staticmethod
-    def merge_pot(from_filenames, to_filename):
-        msgcat = locate_executable("msgcat")
-        if msgcat is None:
-            msgcat = "/usr/bin/msgcat"
-        cmdline = [msgcat, "--use-first"]
+    def merge_pot(from_filenames, to_filename, projectname):
+        # Get the POT Creation Date of the first file and inject it later.
+        pattern = r'("POT-Creation-Date:\s*)(\d{4}-\d{2}-\d{2}.*)(\\n")'
+        with open(from_filenames[0], 'r', encoding='utf-8') as f:
+            original_file1 = f.read()
+        date1 = re.search(pattern, original_file1).group(2)
+        
+        xgettext = locate_executable("xgettext")
+        if xgettext is None:
+            xgettext = "/usr/bin/xgettext"
+        cmdline = [xgettext, "--sort-by-file", "--package-name=" + projectname, "--package-version=1.0"]
         cmdline.extend(from_filenames)
         cmdline.extend(("-o", to_filename))
-        reporter.report_debug_info("msgcat cmd line", cmdline)
+        reporter.report_debug_info("xgettext cmd line", cmdline)
         portable_popen(cmdline).wait()
+        
+        # Inject the creation date back into the produced file
+        with open(to_filename, 'r', encoding='utf-8') as f:
+            finishedfile_orig = f.read()
+        replacement = r'\g<1>' + date1 + r'\g<3>'
+        finishedcontent = re.sub(pattern, replacement, finishedfile_orig, count=1)
+        with open(to_filename, 'w', encoding='utf-8') as f:
+            f.write(finishedcontent)
 
     @staticmethod
     def parse_templates(to_filename):
@@ -157,6 +179,28 @@ class Translations:
 
 
 translations = Translations()  # let's have a singleton
+
+
+def clear_translations(po_filepath, save_path=None):
+    po = polib.pofile(po_filepath)
+    for entry in po:
+        entry.msgstr = ''
+        if entry.msgstr_plural:
+            for idx in entry.msgstr_plural:
+                entry.msgstr_plural[idx] = ''
+    po.save(save_path or po_filepath)
+
+def fill_translations(po_filepath, save_path=None):
+    po = polib.pofile(po_filepath)
+    for entry in po:
+        entry.msgstr = entry.msgid
+        if entry.msgstr_plural:
+            for idx in entry.msgstr_plural:
+                if int(idx) == 0:
+                    entry.msgstr_plural[idx] = entry.msgid
+                else:
+                    entry.msgstr_plural[idx] = entry.msgid_plural
+    po.save(save_path or po_filepath)
 
 
 class POFile:
@@ -186,6 +230,7 @@ class POFile:
         ]
         reporter.report_debug_info("msginit cmd line", cmdline)
         portable_popen(cmdline, cwd=self.i18npath).wait()
+        clear_translations(self.FILENAME_PATTERN.format(self.language))
 
     def _msg_merge(self):
         """Merges an existing <language>.po file with .pot file"""
@@ -200,6 +245,11 @@ class POFile:
             "--backup=simple",
         ]
         reporter.report_debug_info("msgmerge cmd line", cmdline)
+        portable_popen(cmdline, cwd=self.i18npath).wait()
+    
+    def reformat(self):
+        msgcat = locate_executable("msgcat")
+        cmdline = [msgcat, self.FILENAME_PATTERN.format(self.language), "-o", self.FILENAME_PATTERN.format(self.language)]
         portable_popen(cmdline, cwd=self.i18npath).wait()
 
     def _prepare_locale_dir(self):
@@ -558,7 +608,7 @@ class I18NPlugin(Plugin):
         reporter.report_generic(f"{relpath(pots[0], builder.env.root_path)} generated")
         pots = [p for p in pots if os.path.exists(p)]  # only keep existing ones
         if len(pots) > 1:
-            translations.merge_pot(pots, contents_pot_filename)
+            translations.merge_pot(pots, contents_pot_filename, self.env.project.name)
             reporter.report_generic(
                 f"Merged POT files "
                 f"{', '.join(relpath(p, builder.env.root_path) for p in pots)}"
@@ -567,3 +617,6 @@ class I18NPlugin(Plugin):
         for language in self.translations_languages:
             po_file = POFile(language, self.i18npath)
             po_file.generate()
+            if language == self.content_language:
+                fill_translations(po_file.FILENAME_PATTERN.format(po_file.language))
+            po_file.reformat()

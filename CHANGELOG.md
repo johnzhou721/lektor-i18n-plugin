@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.5
+
+* Ensure that POT content is now sorted by path when merging POTs from multiple sources (i.e., templates and content).
+* `xgettext` is used to merge POT files instead of `msgcat`, providing a better header and merging of same strings from different sources.
+* The initially generated PO files will now have a header compatible with GNOME's Translation Editor, since they will have a non-placeholder `Project-Id-Version`. Existing users hitting this problem will need to fill in the `Project-Id-Version` header manually.
+* Translations in templates now provide pgettext and ngettext methods.
+* The bug with non-English content is resolved.
+
 ## 0.5.4
 
 * POT content is now sorted by path.
