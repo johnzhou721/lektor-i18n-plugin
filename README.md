@@ -1,4 +1,4 @@
-**This is a fork of the (unmaintained as of May 2025?) [Numericube lektor-i18n-plugin](https://github.com/numericube/lektor-i18n-plugin)**. BeeWare is maintaining (but not publishing) this fork for our own usage. It was forked on 28 May 2025, and has had some patches applied; see the [change log](./CHANGELOG.md) for details.
+**This is a fork of a fork of the (unmaintained as of May 2025?) [Numericube lektor-i18n-plugin](https://github.com/numericube/lektor-i18n-plugin)**. BeeWare was maintaining (but not publishing) this fork for their own usage. However, BeeWare is now moving to MkDocs for documentation, and the author of this fork felt that there are some valuable changes in their previous patches.  BeeWare forked it on 28 May 2025, and has had some patches applied; John forked it on 27 Jan 2026 (with the first commits onto the main branch). see the [change log](./CHANGELOG.md) for details.
 
 ---
 
